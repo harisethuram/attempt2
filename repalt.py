@@ -162,7 +162,7 @@ def get_melody():
     con = sqlite3.connect("wjazzd.db")
     cur = con.cursor()
     # only select 4/4 
-    melody_x = cur.execute("SELECT m.melid, m.pitch, m.onset, m.duration, m.beat, m.tatum, m.division, m.beatdur from melody m JOIN solo_info s ON m.melid=s.melid WHERE s.signature='4/4'")
+    melody_x = cur.execute("SELECT m.melid, m.pitch, m.onset, m.duration, m.beat, m.tatum, m.division, m.beatdur, s.avgtempo from melody m JOIN solo_info s ON m.melid=s.melid WHERE s.signature='4/4'")
     melody = np.array(melody_x.fetchall()) # N,5, melid pitch onset duration beat tatum division beatdur
 
     # get max melid
@@ -180,26 +180,45 @@ def get_melody():
     
     # quantize songs
     melody_q = np.zeros((melody_b.shape[0], melody_b.shape[1]*2, 2)) # pitch duration (pitch = 0 is rest)
-    beatdurs = melody_b[:, :, -1]
+    beatdurs = melody_b[:, :, -2]
+    avgtempo = melody_b[:, :, -1]
     first_beat = melody_b[:, 0, 3]
     first_tatum = melody_b[:, 0, 4]
     first_division = melody_b[:, 0, 5]
     pitches = melody_b[:, :, 0]
     first_start_offset = (first_beat-1) + (first_tatum - 1) / first_division
-    durations = melody_b[:, :, 2] / (beatdurs)
+    durations = np.nan_to_num(melody_b[:, :, 2] / (beatdurs), 0) # duration of every note
     durations_q = np.round(durations*16)/16
 
-    onsets = np.maximum(melody_b[:, :, 1] - np.expand_dims(melody_b[:, 0, 1], axis=1), 0) / (beatdurs)
+    # print(np.where(durations_q == np.max(durations_q)))
+    # print(durations_q[300, 363])
+    # print(beatdurs[300, 363])
+    # print(melody_b[300, 363, 2])
+    onsets = np.nan_to_num(np.maximum(melody_b[:, :, 1] - np.expand_dims(melody_b[:, 0, 1], axis=1), 0) / (60/avgtempo), 0)
     onsets_q = np.round(onsets*16)/16 + np.expand_dims(first_start_offset, axis=1)
-
+    # print("max1", np.max(onsets_q))
+    # print(np.where(onsets_q == np.max(onsets_q)))
+    # print(beatdurs[219, 4767])
+    # print(np.nan_to_num(np.maximum(melody_b[:, :, 1] - np.expand_dims(melody_b[:, 0, 1], axis=1), 0)[219, 4767]))
+    # print(melody_b[219, 4767, 1])
     # calculate rests
     sum_thing = np.nan_to_num(onsets_q + durations_q, 0) # at what beat each note ends
     rests = np.round(np.maximum(onsets_q - np.roll(sum_thing, shift=1, axis=1), 0)*16)/16 # 
-
+    # print(melody_b[219, 4085:4098, 1])
+    # print(beatdurs[219, 4085:4098])
+    # print(melody_b[219, 4085:4098, 1]/(60/avgtempo[219, 4085:4098]))
+    # print(durations_q[108, 450: 458])
+    # print(sum_thing[108, 450:458])
+    # print(onsets_q[108, 450:458])
+    # print(melody_b[108, 450:458, 1])
+    # print(rests[108, 450:458])
+    rests = np.round(np.maximum(onsets_q - np.roll(sum_thing, shift=1, axis=1), 0)*16)/16 # 
+    
     # remove all nans
     rests = np.nan_to_num(rests, 0)
     durations_q = np.nan_to_num(durations_q, 0)
-    
+    # print("max:", np.max(rests))
+    # print(np.where(rests == np.max(rests)))
     melody_q[:, ::2, 1] = rests
     melody_q[:, 1::2, 1] = durations_q
     melody_q[:, 1::2, 0] = pitches
@@ -316,12 +335,12 @@ def indices_mel(songs, vocab):
     
     return inds, song_to_i, i_to_song
 
-def preprocess(reload=True):
+def preprocess(reload=False):
     if ((not os.path.isfile('harmony.pt')) and (not os.path.isfile('melody.pt'))) or reload==True:
         print("Creating data")
         harmony_vocab, harmony = get_harmony()
         melody_vocab, melody = get_melody()
-
+        
         ih, har_to_i, i_to_har = indices_har(harmony, harmony_vocab)
         im, mel_to_i, i_to_mel = indices_mel(melody, melody_vocab)
         # save values as files
@@ -351,12 +370,12 @@ def preprocess(reload=True):
             i_to_mel = pickle.load(fp3)
 
     return ih, har_to_i, i_to_har, im, mel_to_i, i_to_mel
-    
-ih, har_to_i, i_to_har, im, mel_to_i, i_to_mel = preprocess()
-print(ih)
-print("********************************************************************")
-print(i_to_har)
-print("********************************************************************")
-print(im)
-print("********************************************************************")
-print(i_to_mel)
+
+# ih, har_to_i, i_to_har, im, mel_to_i, i_to_mel = preprocess(True)
+# print(ih)
+# print("********************************************************************")
+# print(i_to_har)
+# print("********************************************************************")
+# print(im)
+# print("********************************************************************")
+# print(i_to_mel)
