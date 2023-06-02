@@ -3,6 +3,7 @@ import numpy as np
 import sqlite3
 import os.path
 import pickle
+from generatemidi import generate_midi
 
 # harmony is the same
 def get_harmony():
@@ -13,7 +14,7 @@ def get_harmony():
     cur = con.cursor()
 
     # only select 4/4
-    harmony_x = cur.execute("SELECT b.melid, b.chord from beats b JOIN solo_info s ON b.melid=s.melid WHERE s.signature='4/4'")
+    harmony_x = cur.execute("SELECT b.melid, b.chord from beats b JOIN solo_info s ON b.melid=s.melid WHERE (s.signature='4/4' AND s.chorus_count<8)")
     harmony = np.array(harmony_x.fetchall())
 
     # get max melid
@@ -88,7 +89,7 @@ def get_harmony():
     freqs_dict = {row[0]: int(row[1]) for row in freqs}
 
     # print(freqs_dict)
-    
+    print(harmony.shape)
     return harmony_vocab, harmony
 
 
@@ -162,9 +163,9 @@ def get_melody():
     con = sqlite3.connect("wjazzd.db")
     cur = con.cursor()
     # only select 4/4 
-    melody_x = cur.execute("SELECT m.melid, m.pitch, m.onset, m.duration, m.beat, m.tatum, m.division, m.beatdur, s.avgtempo from melody m JOIN solo_info s ON m.melid=s.melid WHERE s.signature='4/4'")
+    melody_x = cur.execute("SELECT m.melid, m.pitch, m.onset, m.duration, m.beat, m.tatum, m.division, m.beatdur, s.avgtempo from melody m JOIN solo_info s ON m.melid=s.melid WHERE (s.signature='4/4' AND s.chorus_count<8)")
     melody = np.array(melody_x.fetchall()) # N,5, melid pitch onset duration beat tatum division beatdur
-
+    preciseness = 24 # to what-th note will I be rounding
     # get max melid
     max_melid = np.max(melody[:, 0].astype(int))
 
@@ -188,14 +189,14 @@ def get_melody():
     pitches = melody_b[:, :, 0]
     first_start_offset = (first_beat-1) + (first_tatum - 1) / first_division
     durations = np.nan_to_num(melody_b[:, :, 2] / (beatdurs), 0) # duration of every note
-    durations_q = np.round(durations*16)/16
+    durations_q = np.round(durations*preciseness)/preciseness
 
     # print(np.where(durations_q == np.max(durations_q)))
     # print(durations_q[300, 363])
     # print(beatdurs[300, 363])
     # print(melody_b[300, 363, 2])
     onsets = np.nan_to_num(np.maximum(melody_b[:, :, 1] - np.expand_dims(melody_b[:, 0, 1], axis=1), 0) / (60/avgtempo), 0)
-    onsets_q = np.round(onsets*16)/16 + np.expand_dims(first_start_offset, axis=1)
+    onsets_q = np.round(onsets*preciseness)/preciseness + np.expand_dims(first_start_offset, axis=1)
     # print("max1", np.max(onsets_q))
     # print(np.where(onsets_q == np.max(onsets_q)))
     # print(beatdurs[219, 4767])
@@ -203,7 +204,7 @@ def get_melody():
     # print(melody_b[219, 4767, 1])
     # calculate rests
     sum_thing = np.nan_to_num(onsets_q + durations_q, 0) # at what beat each note ends
-    rests = np.round(np.maximum(onsets_q - np.roll(sum_thing, shift=1, axis=1), 0)*16)/16 # 
+    rests = np.round(np.maximum(onsets_q - np.roll(sum_thing, shift=1, axis=1), 0)*preciseness)/preciseness # 
     # print(melody_b[219, 4085:4098, 1])
     # print(beatdurs[219, 4085:4098])
     # print(melody_b[219, 4085:4098, 1]/(60/avgtempo[219, 4085:4098]))
@@ -212,7 +213,7 @@ def get_melody():
     # print(onsets_q[108, 450:458])
     # print(melody_b[108, 450:458, 1])
     # print(rests[108, 450:458])
-    rests = np.round(np.maximum(onsets_q - np.roll(sum_thing, shift=1, axis=1), 0)*16)/16 # 
+    rests = np.round(np.maximum(onsets_q - np.roll(sum_thing, shift=1, axis=1), 0)*preciseness)/preciseness # 
     
     # remove all nans
     rests = np.nan_to_num(rests, 0)
@@ -252,14 +253,12 @@ def get_melody():
                 indices = np.arange(0, stop=num_keys, step=1) * melody.shape[0] + i
                 melody_aug[indices, j, :] = augs
             
-    
+    melody = melody_aug
     flattened_melody = np.reshape(melody, (melody.shape[0]*melody.shape[1], melody.shape[2]))
     melody_vocab, counts = np.unique(flattened_melody, axis=0, return_counts=True)
     freqs = np.concatenate((melody_vocab, np.expand_dims(counts, axis=1)), axis=1)
     freqs_dict = {tuple(row[:2]): int(row[2]) for row in freqs}
-
-    # print(freqs_dict, melody_vocab.shape, melody.shape[0]*melody.shape[1])
-
+    print(melody.shape, len(freqs_dict))
     return melody_vocab, melody
 
 
@@ -287,6 +286,10 @@ def make_batch(songs, mode):
     num_songs = song_ids.shape[0]
 
     max_length = np.max(np.bincount(songs[:, 0].astype(int)))
+    lengths = np.bincount(songs[:, 0].astype(int))
+    print(mode, np.average(lengths))
+    print(mode, np.std(lengths))
+    print(mode, max_length)
     dim = songs.shape[1] - 1
 
     batched = None
@@ -371,8 +374,9 @@ def preprocess(reload=False):
 
     return ih, har_to_i, i_to_har, im, mel_to_i, i_to_mel
 
-# ih, har_to_i, i_to_har, im, mel_to_i, i_to_mel = preprocess(True)
-# print(ih)
+ih, har_to_i, i_to_har, im, mel_to_i, i_to_mel = preprocess(True)
+
+# print(ih.shape)
 # print("********************************************************************")
 # print(i_to_har)
 # print("********************************************************************")
