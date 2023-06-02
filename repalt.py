@@ -373,9 +373,6 @@ def preprocess(reload=False):
             i_to_mel = pickle.load(fp3)
 
     return ih, har_to_i, i_to_har, im, mel_to_i, i_to_mel
-
-ih, har_to_i, i_to_har, im, mel_to_i, i_to_mel = preprocess(True)
-
 # print(ih.shape)
 # print("********************************************************************")
 # print(i_to_har)
